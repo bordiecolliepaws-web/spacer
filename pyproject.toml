@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spacer"
+version = "0.1.0"
+description = "CLI tool for research paper pipeline management"
+requires-python = ">=3.8"
+dependencies = ["click", "requests", "pyyaml"]
+
+[project.scripts]
+spacer = "spacer.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]

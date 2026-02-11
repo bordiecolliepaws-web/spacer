@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+src/spacer/__init__.py
+src/spacer/bib.py
+src/spacer/cli.py
+src/spacer/init.py
+src/spacer/status.py
+src/spacer.egg-info/PKG-INFO
+src/spacer.egg-info/SOURCES.txt
+src/spacer.egg-info/dependency_links.txt
+src/spacer.egg-info/entry_points.txt
+src/spacer.egg-info/requires.txt
+src/spacer.egg-info/top_level.txt
