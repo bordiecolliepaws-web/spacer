@@ -7,9 +7,9 @@ from pathlib import Path
 import click
 from prompt_toolkit import PromptSession
 
-from .auth import get_backend
+from .auth import get_api_key, get_backend
 from .bib import _s2_fields, _s2_get
-from .llm import call_llm
+from .llm import brain, hands
 from .status import (
     advance_sub_step,
     format_phase_info,
@@ -155,17 +155,22 @@ def chat_cmd():
         click.echo("No spacer.yaml found. Run `spacer init` first.")
         raise SystemExit(1)
 
-    backend = get_backend()
-    if not backend:
-        click.echo("No backend configured. Run `spacer auth` first.")
+    api_key = get_api_key()
+    if not api_key:
+        click.echo("No API key configured. Run `spacer auth` first.")
         raise SystemExit(1)
+
+    coding_agent = get_backend()
+    if coding_agent:
+        click.echo(f"Coding agent: {coding_agent}")
+    else:
+        click.echo("No coding agent configured (execution tasks won't work).")
 
     phase = cfg.get("phase", "unknown")
     sub_step = get_current_sub_step(cfg) or "starting"
 
     click.echo(f"╔══════════════════════════════════════════════╗")
     click.echo(f"║  SPACER — Phase: {phase} ({sub_step})")
-    click.echo(f"║  Backend: {backend}")
     click.echo(f"║  Commands: /status /phase /bib /supply")
     click.echo(f"║            /constitute /review /next /save /quit")
     click.echo(f"╚══════════════════════════════════════════════╝")
@@ -177,15 +182,16 @@ def chat_cmd():
     # Build system prompt
     system_prompt = _build_system_prompt(config_path)
 
+    # Message history for API calls
+    api_messages = []
+
     # Initial greeting
     click.echo("SPACER: Starting up... let me review the project state.")
     try:
-        greeting = call_llm(
-            system_prompt,
-            "The user just opened the chat. Briefly greet them and acknowledge the current phase. What should we work on?",
-            backend,
-        )
+        api_messages.append({"role": "user", "content": "I just opened the chat. Briefly greet me and acknowledge the current phase. What should we work on?"})
+        greeting = brain(system_prompt, api_messages)
         click.echo(f"\nSPACER: {greeting}\n")
+        api_messages.append({"role": "assistant", "content": greeting})
         history.append(("assistant", greeting))
     except Exception as e:
         click.echo(f"\n(Could not get initial greeting: {e})\n")
@@ -218,11 +224,11 @@ def chat_cmd():
                     "scope boundaries, positioning decisions, and key papers with their roles. "
                     "Format as markdown suitable for constitution/ideation.md"
                 )
-                hist_text = "\n".join(f"{r}: {t}" for r, t in history[-20:])
-                full_prompt = f"Discussion so far:\n{hist_text}\n\n{const_prompt}"
+                api_messages.append({"role": "user", "content": const_prompt})
                 try:
-                    constitution = call_llm(system_prompt, full_prompt, backend)
+                    constitution = brain(system_prompt, api_messages)
                     click.echo(f"SPACER:\n{constitution}\n")
+                    api_messages.append({"role": "assistant", "content": constitution})
                     history.append(("assistant", constitution))
 
                     # Offer to save
@@ -240,28 +246,21 @@ def chat_cmd():
                 break
             continue
 
-        # Regular message — send to LLM
+        # Regular message — send to brain
         history.append(("user", user_input))
+        api_messages.append({"role": "user", "content": user_input})
 
-        # Build context with recent history + supplied files
-        context_parts = []
-        if supplied_context:
-            context_parts.append("Supplied materials:\n" + "\n---\n".join(supplied_context))
-        # Include recent history
-        recent = history[-20:]
-        hist_text = "\n".join(f"{'User' if r == 'user' else 'SPACER'}: {t}" for r, t in recent[:-1])
-        if hist_text:
-            context_parts.append(f"Recent conversation:\n{hist_text}")
-        context_parts.append(f"User: {user_input}")
-
-        full_message = "\n\n".join(context_parts)
+        # Trim API messages to avoid token limits (keep last 40)
+        if len(api_messages) > 40:
+            api_messages = api_messages[-40:]
 
         # Refresh system prompt (in case constitution was added)
         system_prompt = _build_system_prompt(config_path)
 
         try:
-            response = call_llm(system_prompt, full_message, backend)
+            response = brain(system_prompt, api_messages)
             click.echo(f"\nSPACER: {response}\n")
+            api_messages.append({"role": "assistant", "content": response})
             history.append(("assistant", response))
         except Exception as e:
             click.echo(f"\nError: {e}\n")

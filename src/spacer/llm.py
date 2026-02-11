@@ -1,96 +1,145 @@
-"""SPACER LLM backend — shells out to claude or codex CLI."""
+"""SPACER LLM layer — brain (API) + hands (coding agent CLI)."""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
-from .auth import get_backend
+from .auth import get_api_key, get_backend, get_brain_model
 
 
-def call_llm(system_prompt: str, user_message: str, backend: str = None) -> str:
-    """Call the LLM via CLI backend.
+# ─── Brain: direct API for discussion/evaluation/planning ───
+
+def brain(system_prompt: str, messages: list, stream: bool = False):
+    """Call SPACER's brain (Anthropic API) for interactive tasks.
     
     Args:
-        system_prompt: System instructions for the LLM
-        user_message: The user's message/prompt
-        backend: "claude" or "codex" (auto-detects if None)
+        system_prompt: System instructions
+        messages: List of {"role": "user"|"assistant", "content": "..."}
+        stream: Whether to stream the response
     
     Returns:
-        The LLM's response text
+        Response text (or generator if streaming)
+    """
+    from anthropic import Anthropic
+
+    api_key = get_api_key()
+    if not api_key:
+        raise RuntimeError("No API key configured. Run `spacer auth` first.")
+
+    model = get_brain_model()
+    client = Anthropic(api_key=api_key)
+
+    if stream:
+        return _brain_stream(client, model, system_prompt, messages)
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        system=system_prompt,
+        messages=messages,
+    )
+
+    # Extract text
+    parts = []
+    for block in response.content:
+        if hasattr(block, "text"):
+            parts.append(block.text)
+    return "\n".join(parts).strip() or "(No response)"
+
+
+def _brain_stream(client, model, system_prompt, messages):
+    """Stream brain response, yielding text chunks."""
+    with client.messages.stream(
+        model=model,
+        max_tokens=4096,
+        system=system_prompt,
+        messages=messages,
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
+
+# ─── Hands: coding agent CLI for execution tasks ───
+
+def hands(prompt: str, workdir: str = ".", backend: str = None, timeout: int = 300):
+    """Launch coding agent to execute a task in the repo.
+    
+    Args:
+        prompt: Task description for the coding agent
+        workdir: Working directory for the agent
+        backend: "claude" or "codex" (auto-detects if None)
+        timeout: Max seconds to wait
+    
+    Returns:
+        (stdout, stderr, returncode)
     """
     if backend is None:
         backend = get_backend()
     if not backend:
-        raise RuntimeError("No backend configured. Run `spacer auth` first.")
+        raise RuntimeError("No coding agent configured. Run `spacer auth` first.")
 
     if backend == "claude":
-        return _call_claude(system_prompt, user_message)
+        return _hands_claude(prompt, workdir, timeout)
     elif backend == "codex":
-        return _call_codex(system_prompt, user_message)
+        return _hands_codex(prompt, workdir, timeout)
     else:
         raise RuntimeError(f"Unknown backend: {backend}")
 
 
-def _call_claude(system_prompt: str, user_message: str) -> str:
-    """Call Claude Code CLI."""
-    # Write system prompt to temp file for --system-prompt flag
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-        f.write(system_prompt)
-        system_file = f.name
-
-    try:
-        # claude --print outputs response to stdout without interactive mode
-        # --system-prompt reads from file
-        full_prompt = user_message
-        result = subprocess.run(
-            ["claude", "--print", "--system-prompt", system_file, full_prompt],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            # Try simpler invocation
-            result = subprocess.run(
-                ["claude", "--print", full_prompt],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        return result.stdout.strip() or result.stderr.strip() or "(No response)"
-    except subprocess.TimeoutExpired:
-        return "(Response timed out)"
-    except FileNotFoundError:
-        return "(claude CLI not found. Install: npm install -g @anthropic-ai/claude-code)"
-    finally:
-        Path(system_file).unlink(missing_ok=True)
-
-
-def _call_codex(system_prompt: str, user_message: str) -> str:
-    """Call Codex CLI."""
-    # codex exec runs a one-shot prompt
-    # Combine system + user into one prompt since codex exec doesn't have --system-prompt
-    combined = f"{system_prompt}\n\n---\n\nUser request:\n{user_message}"
-
+def _hands_claude(prompt: str, workdir: str, timeout: int):
+    """Execute task via Claude Code CLI."""
     try:
         result = subprocess.run(
-            ["codex", "exec", combined],
+            ["claude", "--print", prompt],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
+            cwd=workdir,
         )
-        return result.stdout.strip() or result.stderr.strip() or "(No response)"
+        return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired:
-        return "(Response timed out)"
+        return "", "Timed out", -1
     except FileNotFoundError:
-        return "(codex CLI not found. Install: npm install -g @openai/codex)"
+        return "", "claude CLI not found", -1
 
 
-def call_llm_streaming(system_prompt: str, user_message: str, backend: str = None):
-    """Call LLM and yield chunks as they arrive (for TUI streaming).
+def _hands_codex(prompt: str, workdir: str, timeout: int):
+    """Execute task via Codex CLI."""
+    try:
+        result = subprocess.run(
+            ["codex", "exec", "--full-auto", prompt],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=workdir,
+        )
+        return result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired:
+        return "", "Timed out", -1
+    except FileNotFoundError:
+        return "", "codex CLI not found", -1
+
+
+def hands_background(prompt: str, workdir: str = ".", backend: str = None):
+    """Launch coding agent in background, return process handle.
     
-    Falls back to non-streaming if streaming not available.
+    For long-running tasks (experiments, large drafts).
     """
-    # For now, just call and return full response
-    # TODO: implement actual streaming with subprocess pipes
-    response = call_llm(system_prompt, user_message, backend)
-    yield response
+    if backend is None:
+        backend = get_backend()
+
+    if backend == "claude":
+        cmd = ["claude", "--print", prompt]
+    elif backend == "codex":
+        cmd = ["codex", "exec", "--full-auto", prompt]
+    else:
+        raise RuntimeError(f"Unknown backend: {backend}")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=workdir,
+    )
+    return proc
