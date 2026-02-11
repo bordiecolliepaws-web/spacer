@@ -1,14 +1,15 @@
+"""SPACER interactive chat — shells out to claude/codex CLI."""
+
 import shlex
 from datetime import datetime
 from pathlib import Path
 
 import click
-from anthropic import Anthropic
 from prompt_toolkit import PromptSession
-from prompt_toolkit.shortcuts import clear
 
-from .auth import get_anthropic_api_key
+from .auth import get_backend
 from .bib import _s2_fields, _s2_get
+from .llm import call_llm
 from .status import (
     advance_sub_step,
     format_phase_info,
@@ -19,386 +20,248 @@ from .status import (
     load_spacer_config,
 )
 
-MODEL_NAME = "claude-sonnet-4-5"
 SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "system.md"
-MAX_HISTORY_MESSAGES = 60
 MAX_SUPPLY_CHARS = 12000
-DISPLAY_MESSAGES = 24
-
-
-def _extract_response_text(response):
-    blocks = getattr(response, "content", [])
-    parts = []
-    for block in blocks:
-        block_type = getattr(block, "type", None)
-        if block_type == "text":
-            parts.append(getattr(block, "text", ""))
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-    text = "\n".join(p for p in parts if p).strip()
-    return text or "(No response text returned.)"
-
-
-def _trim_history(history):
-    if len(history) > MAX_HISTORY_MESSAGES:
-        del history[:-MAX_HISTORY_MESSAGES]
 
 
 def _build_system_prompt(config_path):
+    """Build system prompt from template + current state."""
     template = SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")
     cfg = load_spacer_config(config_path)
 
-    phase = get_phase(cfg)
-    phase_status = get_phase_status(cfg)
+    phase = cfg.get("phase", "unknown")
+    phase_status = cfg.get("phase_status", "unknown")
     sub_step = get_current_sub_step(cfg)
-    if sub_step is None:
-        sub_step_text = "none"
-    elif sub_step == "complete":
-        sub_step_text = "complete"
-    else:
-        sub_step_text = sub_step.replace("_", " ")
 
-    constitution_path = Path("constitution/ideation.md")
-    if constitution_path.exists():
-        constitution_text = constitution_path.read_text(encoding="utf-8", errors="replace").strip()
-    else:
-        constitution_text = "(No constitution/ideation.md found yet.)"
+    # Load constitution if exists
+    constitution = ""
+    const_path = Path("constitution/ideation.md")
+    if const_path.exists():
+        constitution = const_path.read_text(encoding="utf-8")
 
-    return (
-        template.replace("[[PHASE]]", str(phase))
-        .replace("[[PHASE_STATUS]]", str(phase_status))
-        .replace("[[SUB_STEP]]", str(sub_step_text))
-        .replace("[[CONSTITUTION]]", constitution_text)
-    )
+    prompt = template.replace("[[PHASE]]", phase)
+    prompt = prompt.replace("[[PHASE_STATUS]]", phase_status)
+    prompt = prompt.replace("[[SUB_STEP]]", sub_step or "none")
+    prompt = prompt.replace("[[CONSTITUTION]]", constitution or "(none yet)")
+
+    return prompt
 
 
-def _ask_model(client, config_path, history, user_text):
-    system_prompt = _build_system_prompt(config_path)
-    response = client.messages.create(
-        model=MODEL_NAME,
-        max_tokens=1200,
-        system=system_prompt,
-        messages=history + [{"role": "user", "content": user_text}],
-    )
-    text = _extract_response_text(response)
-    history.append({"role": "user", "content": user_text})
-    history.append({"role": "assistant", "content": text})
-    _trim_history(history)
-    return text
+def _save_transcript(history, phase):
+    """Save conversation to markdown file."""
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_dir = Path(f"notes/{phase}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"discussion-{ts}.md"
 
-
-def _render_header(cfg):
-    phase = get_phase(cfg)
-    status = get_phase_status(cfg)
-    sub_step = get_current_sub_step(cfg)
-    if sub_step is None:
-        sub_step_label = "none"
-    elif sub_step == "complete":
-        sub_step_label = "complete"
-    else:
-        sub_step_label = sub_step.replace("_", " ")
-    return f"SPACER Chat | Phase: {phase} ({status}) | Sub-step: {sub_step_label}"
-
-
-def _render_chat(cfg, transcript):
-    clear()
-    header = _render_header(cfg)
-    click.echo(header)
-    click.echo("=" * len(header))
-    for role, text in transcript[-DISPLAY_MESSAGES:]:
-        if role == "user":
-            label = "You"
-        elif role == "assistant":
-            label = "SPACER"
-        else:
-            label = "System"
-        click.echo(f"\n{label}:")
-        click.echo(text.rstrip() if text else "")
-    click.echo("")
-
-
-def _save_conversation(transcript, cfg):
-    notes_dir = Path("notes/ideation")
-    notes_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = notes_dir / f"discussion-{stamp}.md"
-
-    phase = get_phase(cfg)
-    status = get_phase_status(cfg)
-    sub_step = get_current_sub_step(cfg) or "none"
-    sub_step = sub_step.replace("_", " ")
-
-    lines = [
-        "# SPACER Discussion",
-        "",
-        f"- Timestamp: {datetime.now().isoformat(timespec='seconds')}",
-        f"- Phase: {phase} ({status})",
-        f"- Sub-step: {sub_step}",
-        "",
-        "## Transcript",
-        "",
-    ]
-
-    for role, text in transcript:
-        if role == "user":
-            label = "You"
-        elif role == "assistant":
-            label = "SPACER"
-        else:
-            label = "System"
-        lines.append(f"### {label}")
-        lines.append((text or "").rstrip())
-        lines.append("")
+    lines = [f"# SPACER Discussion — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"]
+    for role, text in history:
+        header = "## You" if role == "user" else "## SPACER"
+        lines.append(f"\n{header}\n{text}\n")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
     return out_path
 
 
-def _search_inline(query, limit=5):
-    r = _s2_get(
-        "https://api.semanticscholar.org/graph/v1/paper/search",
-        params={"query": query, "limit": limit, "fields": _s2_fields()},
-    )
-    data = r.json().get("data", [])
-    if not data:
-        return f'No results found for "{query}".'
+def _handle_slash(cmd_line, history, config_path):
+    """Handle slash commands. Returns (response_text, should_quit)."""
+    parts = shlex.split(cmd_line)
+    cmd = parts[0].lower() if parts else ""
 
-    lines = [f'Results for "{query}":']
-    for idx, paper in enumerate(data, 1):
-        authors = ", ".join(a.get("name", "") for a in paper.get("authors", [])[:3]) or "Unknown authors"
-        if len(paper.get("authors", [])) > 3:
-            authors += " et al."
-        year = paper.get("year", "?")
-        title = paper.get("title", "?")
-        venue = paper.get("venue", "")
-        lines.append(f"[{idx}] {title} ({year})")
-        lines.append(f"    {authors}")
-        if venue:
-            lines.append(f"    {venue}")
-    return "\n".join(lines)
-
-
-def _review_drafts():
-    files = []
-    for pattern in ["constitution/*.md", "paper/sections/*", "paper/plan/*.md"]:
-        files.extend(sorted(Path(".").glob(pattern)))
-
-    files = [p for p in files if p.is_file() and p.name != ".gitkeep"]
-    if not files:
-        return "No draft files found yet."
-
-    lines = ["Draft files:"]
-    for path in files:
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            preview = "(unreadable)"
-        else:
-            preview = "(empty)"
-            for line in content.splitlines():
-                if line.strip():
-                    preview = line.strip()
-                    break
-            if len(preview) > 90:
-                preview = preview[:87] + "..."
-        lines.append(f"- {path}: {preview}")
-    return "\n".join(lines)
-
-
-def _command_help():
-    return (
-        "Slash commands:\n"
-        "/status\n"
-        "/phase\n"
-        '/bib search "query"\n'
-        "/supply <filepath>\n"
-        "/constitute\n"
-        "/review\n"
-        "/save\n"
-        "/next\n"
-        "/quit or /exit"
-    )
-
-
-def _handle_slash_command(command_text, client, config_path, transcript, history):
-    try:
-        parts = shlex.split(command_text)
-    except ValueError as exc:
-        transcript.append(("system", f"Command parse error: {exc}"))
-        return False, None
-
-    if not parts:
-        return False, None
-
-    cmd = parts[0].lower()
-
-    if cmd in {"/quit", "/exit"}:
+    if cmd in ("/quit", "/exit"):
         cfg = load_spacer_config(config_path)
-        saved = _save_conversation(transcript, cfg)
-        return True, f"Saved conversation to {saved}"
+        phase = cfg.get("phase", "ideation")
+        path = _save_transcript(history, phase)
+        return f"Saved transcript to {path}. Goodbye!", True
 
-    if cmd == "/help":
-        transcript.append(("system", _command_help()))
-        return False, None
+    elif cmd == "/status":
+        return format_status(config_path), False
 
-    if cmd == "/status":
+    elif cmd == "/phase":
+        return format_phase_info(config_path), False
+
+    elif cmd == "/next":
+        msg = advance_sub_step(config_path)
+        return msg, False
+
+    elif cmd == "/save":
         cfg = load_spacer_config(config_path)
-        transcript.append(("system", format_status(cfg)))
-        return False, None
+        phase = cfg.get("phase", "ideation")
+        path = _save_transcript(history, phase)
+        return f"Saved to {path}", False
 
-    if cmd == "/phase":
-        cfg = load_spacer_config(config_path)
-        transcript.append(("system", format_phase_info(cfg)))
-        return False, None
-
-    if cmd == "/bib":
-        if len(parts) >= 3 and parts[1].lower() == "search":
-            query = " ".join(parts[2:])
-            try:
-                result = _search_inline(query)
-            except Exception as exc:
-                result = f"Bibliography search failed: {exc}"
-            transcript.append(("system", result))
-        else:
-            transcript.append(("system", 'Usage: /bib search "query"'))
-        return False, None
-
-    if cmd == "/supply":
+    elif cmd == "/supply":
         if len(parts) < 2:
-            transcript.append(("system", "Usage: /supply <filepath>"))
-            return False, None
+            return "Usage: /supply <filepath>", False
+        fpath = Path(parts[1])
+        if not fpath.exists():
+            return f"File not found: {fpath}", False
+        text = fpath.read_text(encoding="utf-8")
+        if len(text) > MAX_SUPPLY_CHARS:
+            text = text[:MAX_SUPPLY_CHARS] + "\n...(truncated)"
+        return f"📄 Loaded {fpath.name} ({len(text)} chars). Content added to context.", False
 
-        supply_path = Path(parts[1]).expanduser()
-        if not supply_path.is_absolute():
-            supply_path = (Path.cwd() / supply_path).resolve()
-        if not supply_path.exists() or not supply_path.is_file():
-            transcript.append(("system", f"File not found: {supply_path}"))
-            return False, None
-
+    elif cmd == "/bib":
+        if len(parts) < 3 or parts[1] != "search":
+            return "Usage: /bib search \"query\"", False
+        query = " ".join(parts[2:])
         try:
-            content = supply_path.read_text(encoding="utf-8", errors="replace")
-        except Exception as exc:
-            transcript.append(("system", f"Failed to read file: {exc}"))
-            return False, None
+            params = {"query": query, "limit": 5, "fields": _s2_fields()}
+            resp = _s2_get("https://api.semanticscholar.org/graph/v1/paper/search", params)
+            if resp is None:
+                return "Search failed (rate limited)", False
+            data = resp.json().get("data", [])
+            if not data:
+                return "No results found.", False
+            lines = []
+            for p in data:
+                authors = ", ".join(a.get("name", "?") for a in (p.get("authors") or [])[:3])
+                year = p.get("year", "?")
+                title = p.get("title", "?")
+                cite = p.get("citationCount", 0)
+                lines.append(f"• [{year}] {title}\n  {authors} (citations: {cite})")
+            return "\n".join(lines), False
+        except Exception as e:
+            return f"Search error: {e}", False
 
-        trimmed = content[:MAX_SUPPLY_CHARS]
-        note = ""
-        if len(content) > MAX_SUPPLY_CHARS:
-            note = f"\n\n[Truncated to first {MAX_SUPPLY_CHARS} characters.]"
-        payload = (
-            f"User supplied file: {supply_path}\n"
-            "Treat the following content as trusted project context:\n\n"
-            f"{trimmed}{note}"
-        )
-        history.append({"role": "user", "content": payload})
-        _trim_history(history)
-        transcript.append(("system", f"Added file context: {supply_path}"))
-        return False, None
+    elif cmd == "/constitute":
+        return "CONSTITUTE_REQUEST", False
 
-    if cmd == "/constitute":
-        if client is None:
-            transcript.append(("system", "No API key configured. Run `spacer auth` first."))
-            return False, None
+    elif cmd == "/review":
+        # Show existing drafts
+        sections_dir = Path("paper/sections")
+        if not sections_dir.exists():
+            return "No drafts yet (paper/sections/ is empty)", False
+        files = sorted(sections_dir.glob("*.tex"))
+        if not files:
+            return "No .tex files in paper/sections/ yet.", False
+        lines = ["Existing drafts:"]
+        for f in files:
+            size = f.stat().st_size
+            lines.append(f"  • {f.name} ({size} bytes)")
+        lines.append("\nUse /supply paper/sections/<file>.tex to load a draft for discussion.")
+        return "\n".join(lines), False
 
-        prompt = (
-            "Generate markdown for constitution/ideation.md based on this discussion. "
-            "Include sections for McEnerney framing, terminology, scope, positioning, "
-            "key papers and their roles, and explicit decisions. Return only markdown."
-        )
-        click.echo("SPACER is drafting constitution...")
-        try:
-            draft = _ask_model(client, config_path, history, prompt)
-        except Exception as exc:
-            transcript.append(("system", f"Constitution generation failed: {exc}"))
-            return False, None
-
-        constitution_path = Path("constitution/ideation.md")
-        constitution_path.parent.mkdir(parents=True, exist_ok=True)
-        constitution_path.write_text(draft, encoding="utf-8")
-        transcript.append(("assistant", draft))
-        transcript.append(("system", f"Saved constitution draft to {constitution_path}"))
-        return False, None
-
-    if cmd == "/review":
-        transcript.append(("system", _review_drafts()))
-        return False, None
-
-    if cmd == "/save":
-        cfg = load_spacer_config(config_path)
-        saved = _save_conversation(transcript, cfg)
-        transcript.append(("system", f"Saved conversation to {saved}"))
-        return False, None
-
-    if cmd == "/next":
-        try:
-            _, message, _ = advance_sub_step(config_path)
-        except Exception as exc:
-            message = f"Failed to advance sub-step: {exc}"
-        transcript.append(("system", message))
-        return False, None
-
-    transcript.append(("system", f"Unknown command: {cmd}\n{_command_help()}"))
-    return False, None
+    else:
+        return f"Unknown command: {cmd}\nCommands: /status /phase /next /bib /supply /constitute /review /save /quit", False
 
 
 @click.command("chat")
-@click.option("--config-path", default="spacer.yaml", show_default=True, help="Path to project config.")
-def chat_cmd(config_path):
-    """Launch SPACER interactive chat interface."""
-    if not Path(config_path).exists():
-        click.echo("No spacer.yaml found. Run `spacer init` first.", err=True)
+def chat_cmd():
+    """Start interactive SPACER chat session."""
+    config_path = "spacer.yaml"
+    cfg = load_spacer_config(config_path)
+    if cfg is None:
+        click.echo("No spacer.yaml found. Run `spacer init` first.")
         raise SystemExit(1)
 
-    api_key = get_anthropic_api_key()
-    client = Anthropic(api_key=api_key) if api_key else None
+    backend = get_backend()
+    if not backend:
+        click.echo("No backend configured. Run `spacer auth` first.")
+        raise SystemExit(1)
 
-    transcript = [("system", "Interactive SPACER chat started. Type /help for commands.")]
-    if not client:
-        transcript.append(
-            (
-                "system",
-                "Anthropic API key not found. Run `spacer auth` or set ANTHROPIC_API_KEY. "
-                "Slash commands still work.",
-            )
+    phase = cfg.get("phase", "unknown")
+    sub_step = get_current_sub_step(cfg) or "starting"
+
+    click.echo(f"╔══════════════════════════════════════════════╗")
+    click.echo(f"║  SPACER — Phase: {phase} ({sub_step})")
+    click.echo(f"║  Backend: {backend}")
+    click.echo(f"║  Commands: /status /phase /bib /supply")
+    click.echo(f"║            /constitute /review /next /save /quit")
+    click.echo(f"╚══════════════════════════════════════════════╝")
+    click.echo()
+
+    history = []  # list of (role, text)
+    supplied_context = []  # extra context from /supply
+
+    # Build system prompt
+    system_prompt = _build_system_prompt(config_path)
+
+    # Initial greeting
+    click.echo("SPACER: Starting up... let me review the project state.")
+    try:
+        greeting = call_llm(
+            system_prompt,
+            "The user just opened the chat. Briefly greet them and acknowledge the current phase. What should we work on?",
+            backend,
         )
-    history = []
+        click.echo(f"\nSPACER: {greeting}\n")
+        history.append(("assistant", greeting))
+    except Exception as e:
+        click.echo(f"\n(Could not get initial greeting: {e})\n")
 
     session = PromptSession()
-    while True:
-        cfg = load_spacer_config(config_path)
-        _render_chat(cfg, transcript)
 
+    while True:
         try:
-            user_input = session.prompt("you> ").strip()
-        except (KeyboardInterrupt, EOFError):
-            saved = _save_conversation(transcript, cfg)
-            click.echo(f"\nSaved conversation to {saved}")
+            user_input = session.prompt("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            cfg = load_spacer_config(config_path)
+            phase = cfg.get("phase", "ideation")
+            path = _save_transcript(history, phase)
+            click.echo(f"\nSaved transcript to {path}. Goodbye!")
             break
 
         if not user_input:
             continue
 
-        transcript.append(("user", user_input))
-
+        # Handle slash commands
         if user_input.startswith("/"):
-            should_exit, message = _handle_slash_command(
-                user_input, client, config_path, transcript, history
-            )
-            if should_exit:
-                if message:
-                    click.echo(message)
+            response, should_quit = _handle_slash(user_input, history, config_path)
+
+            if response == "CONSTITUTE_REQUEST":
+                # Ask LLM to generate constitution from discussion
+                click.echo("\nSPACER: Generating constitution from our discussion...\n")
+                const_prompt = (
+                    "Based on our discussion so far, generate a constitution document for this research project. "
+                    "Include: McEnerney framing (readers, instability, cost, solution), terminology definitions, "
+                    "scope boundaries, positioning decisions, and key papers with their roles. "
+                    "Format as markdown suitable for constitution/ideation.md"
+                )
+                hist_text = "\n".join(f"{r}: {t}" for r, t in history[-20:])
+                full_prompt = f"Discussion so far:\n{hist_text}\n\n{const_prompt}"
+                try:
+                    constitution = call_llm(system_prompt, full_prompt, backend)
+                    click.echo(f"SPACER:\n{constitution}\n")
+                    history.append(("assistant", constitution))
+
+                    # Offer to save
+                    save = click.confirm("Save to constitution/ideation.md?", default=True)
+                    if save:
+                        Path("constitution").mkdir(exist_ok=True)
+                        Path("constitution/ideation.md").write_text(constitution, encoding="utf-8")
+                        click.echo("✓ Saved constitution/ideation.md")
+                except Exception as e:
+                    click.echo(f"Error: {e}")
+                continue
+
+            click.echo(f"\n{response}\n")
+            if should_quit:
                 break
             continue
 
-        if client is None:
-            transcript.append(("system", "No API key configured. Run `spacer auth` first."))
-            continue
+        # Regular message — send to LLM
+        history.append(("user", user_input))
 
-        click.echo("SPACER is thinking...")
+        # Build context with recent history + supplied files
+        context_parts = []
+        if supplied_context:
+            context_parts.append("Supplied materials:\n" + "\n---\n".join(supplied_context))
+        # Include recent history
+        recent = history[-20:]
+        hist_text = "\n".join(f"{'User' if r == 'user' else 'SPACER'}: {t}" for r, t in recent[:-1])
+        if hist_text:
+            context_parts.append(f"Recent conversation:\n{hist_text}")
+        context_parts.append(f"User: {user_input}")
+
+        full_message = "\n\n".join(context_parts)
+
+        # Refresh system prompt (in case constitution was added)
+        system_prompt = _build_system_prompt(config_path)
+
         try:
-            reply = _ask_model(client, config_path, history, user_input)
-        except Exception as exc:
-            transcript.append(("system", f"LLM request failed: {exc}"))
-            continue
-
-        transcript.append(("assistant", reply))
+            response = call_llm(system_prompt, full_message, backend)
+            click.echo(f"\nSPACER: {response}\n")
+            history.append(("assistant", response))
+        except Exception as e:
+            click.echo(f"\nError: {e}\n")
