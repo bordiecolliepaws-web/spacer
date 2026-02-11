@@ -14,3 +14,6 @@ spacer = "spacer.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+spacer = ["prompts/*.md"]
