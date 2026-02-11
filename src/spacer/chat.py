@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 from prompt_toolkit import PromptSession
 
-from .auth import get_api_key, get_backend
+from .auth import get_backend
 from .bib import _s2_fields, _s2_get
 from .llm import brain, hands
 from .status import (
@@ -155,16 +155,10 @@ def chat_cmd():
         click.echo("No spacer.yaml found. Run `spacer init` first.")
         raise SystemExit(1)
 
-    api_key = get_api_key()
-    if not api_key:
-        click.echo("No API key configured. Run `spacer auth` first.")
+    backend = get_backend()
+    if not backend:
+        click.echo("No backend configured. Run `spacer auth` first.")
         raise SystemExit(1)
-
-    coding_agent = get_backend()
-    if coding_agent:
-        click.echo(f"Coding agent: {coding_agent}")
-    else:
-        click.echo("No coding agent configured (execution tasks won't work).")
 
     phase = cfg.get("phase", "unknown")
     sub_step = get_current_sub_step(cfg) or "starting"

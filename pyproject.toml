@@ -7,7 +7,7 @@ name = "spacer"
 version = "0.1.0"
 description = "CLI tool for research paper pipeline management"
 requires-python = ">=3.8"
-dependencies = ["click", "requests", "pyyaml", "prompt_toolkit", "anthropic"]
+dependencies = ["click", "requests", "pyyaml", "prompt_toolkit"]
 
 [project.scripts]
 spacer = "spacer.cli:cli"
