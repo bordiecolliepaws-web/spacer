@@ -2,287 +2,287 @@
 
 > Survey literature, find the gap, articulate the problem, write the first paper artifacts.
 
-## Entry Point
+## Universal Pattern
 
-The researcher starts a new project. They either:
-- **Chat:** "I want to work on adaptive decision making for LLMs"
-- **File:** Create `paper.yaml` with a topic and target venue
-
-## Repo State at Start of Phase 1
+Every SPACER phase follows this loop:
 
 ```
-project/
-├── spacer.yaml              # Project config (created by `spacer init`)
-├── AGENTS.md                # Instructions for the LLM (SPACER-provided)
-├── constitution/
-│   └── README.md            # Project constitution (starts minimal, grows)
-├── paper/
-│   ├── plan/
-│   │   └── _overview.md     # Empty template — to be filled during ideation
-│   ├── sections/            # Empty — LaTeX files created during later phases
-│   └── ref.bib              # Empty — populated by bibtex_fetch
-└── notes/
-    └── ideation/            # Working notes for this phase
+DISCUSS (human + agent) → CONSTITUTE (lock intent) → EXECUTE (agent) → REVIEW (human)
+                                                                            ↓
+                                                                       loop back
 ```
 
-## spacer.yaml (Initial)
+---
 
-```yaml
-project:
-  title: ""                  # TBD — refined during ideation
-  venue: KDD 2026
-  page_limit: 8
-  template: acmart
+## Phase 1 Applied
 
-phase: ideation              # Current phase
-phase_status: started        # started | in-progress | review | complete
-
-# McEnerney framing — filled during ideation
-framing:
-  readers: ""                # Who are the target readers?
-  instability: ""            # What's the gap/problem?
-  cost: ""                   # Why does the gap matter?
-  solution: ""               # High-level proposed approach
-
-# Tracks what's been done
-ideation:
-  literature_survey: false
-  problem_articulated: false
-  related_work_drafted: false
-  intro_drafted: false
-  abstract_half_drafted: false
+```
+┌─────────────────────────────────────┐
+│  DISCUSS (interactive, looping)      │
+│                                      │
+│  1.1 Literature Survey               │
+│  1.2 Problem Articulation            │
+│      Loop until framing is sharp     │
+└──────────┬──────────────────────────┘
+           ↓
+┌─────────────────────────────────────┐
+│  CONSTITUTE (lock intent)            │
+│                                      │
+│  Produce ideation constitution:      │
+│  - McEnerney framing (locked)        │
+│  - Terminology + definitions         │
+│  - Scope boundaries                  │
+│  - Positioning decisions             │
+│  - Key papers + their roles          │
+│                                      │
+│  Human reviews & approves            │
+└──────────┬──────────────────────────┘
+           ↓
+┌─────────────────────────────────────┐
+│  EXECUTE (agent works autonomously)  │
+│                                      │
+│  1.3 Draft Related Work              │
+│  1.4 Draft Introduction              │
+│  1.5 Draft Abstract (first half)     │
+└──────────┬──────────────────────────┘
+           ↓
+┌─────────────────────────────────────┐
+│  REVIEW (human checks)              │
+│                                      │
+│  If issues → loop back to:           │
+│  - DISCUSS (framing was wrong)       │
+│  - CONSTITUTE (intent unclear)       │
+│  - EXECUTE (just needs rewrite)      │
+└─────────────────────────────────────┘
 ```
 
-## Sub-Steps of Ideation
+---
 
-### Step 1.1: Topic Exploration & Literature Survey
+## Step 1.1: Literature Survey (DISCUSS)
 
-**Chat interaction:**
-```
-Researcher: "I want to work on adaptive decision making for LLMs"
+**What happens:**
+Researcher gives a topic. Agent searches, summarizes, presents. They loop until the landscape is clear.
 
-Agent: "Let me search for recent work in this area..."
-       [uses web_search + bibtex_fetch to find papers]
-       
-       "Here's what I found — 3 main threads:
-        1. Chain-of-thought reasoning (Wei et al. 2022, ...)
-        2. Tool-augmented LLMs (Schick et al. 2023, ...)
-        3. Adaptive computation (Graves 2016, ...)
-        
-        Which direction interests you? Or is there a specific
-        angle you already have in mind?"
-```
+**Agent behavior:**
+- Search Semantic Scholar, arXiv, DBLP
+- Fetch real bibtex for every paper (`spacer bib`)
+- Present organized themes, not raw lists
+- Ask clarifying questions
+- Flag gaps it notices
 
-**Repo artifacts created:**
+**Repo artifacts:**
 ```
 notes/ideation/
-├── literature-survey.md     # Organized summary of found papers
-├── paper-notes/
-│   ├── wei2022-cot.md       # Per-paper notes (key ideas, relevance)
-│   ├── schick2023-tools.md
-│   └── ...
-└── themes.md                # Grouped themes from the literature
-    
-paper/
-└── ref.bib                  # Bibtex entries added (verified via API)
+├── literature-survey.md     # Organized summary with themes + gaps
+├── paper-notes/             # Per-paper notes (optional, for key papers)
+│   └── {author}{year}.md
+└── themes.md                # Grouped themes
+
+paper/ref.bib                # Growing bibtex file (verified entries only)
 ```
 
 **`literature-survey.md` format:**
 ```markdown
-# Literature Survey: Adaptive Decision Making for LLMs
+# Literature Survey: [Topic]
 
 ## Search Queries Used
-- "adaptive decision making LLM" (Semantic Scholar, 2024-2026)
-- "selective evidence processing" (DBLP)
+- "query 1" (source, date range)
 - ...
 
-## Key Papers
-| Paper | Year | Venue | Relevance | Key Idea |
-|-------|------|-------|-----------|----------|
-| Wei et al. | 2022 | NeurIPS | High | Chain-of-thought prompting |
-| ... | | | | |
-
 ## Themes
-1. **[Theme A]** — ...
-2. **[Theme B]** — ...
+### Theme A: [name]
+- Paper 1 (key idea, relevance)
+- Paper 2 ...
+### Theme B: [name]
+- ...
 
 ## Gaps Identified
-- Gap 1: ...
-- Gap 2: ...
+1. [Gap] — no work addresses...
+2. [Gap] — existing approaches assume...
 ```
 
-### Step 1.2: Problem Articulation (McEnerney)
+---
 
-**Chat interaction:**
+## Step 1.2: Problem Articulation (DISCUSS)
+
+**What happens:**
+Agent guides researcher through McEnerney's framework. This MUST be interactive — the instability comes from the researcher's insight.
+
+**Agent asks:**
+1. **Readers:** "Who specifically will read this? KDD reviewers who work on...?"
+2. **Instability:** "What do these readers currently believe/assume that is wrong or incomplete?"
+3. **Cost:** "What do they lose by not resolving this? Why should they care?"
+4. **Solution:** "At a high level, what's your proposed approach?"
+
+**Agent challenges weak framing:**
+- "That instability is too vague — can you give a specific example?"
+- "The cost isn't compelling enough — is there a quantitative angle?"
+- "Your solution sounds like X which already exists — how is this different?"
+
+**Looping:** This step repeats until both human and agent agree the framing is sharp.
+
+---
+
+## CONSTITUTE: Ideation Constitution
+
+After steps 1.1 and 1.2, the agent produces a constitution document that locks down:
+
+**File: `constitution/ideation.md`**
+
+```markdown
+# Ideation Constitution
+
+## McEnerney Framing
+- **Readers:** [locked]
+- **Instability:** [locked]
+- **Cost:** [locked]
+- **Solution direction:** [locked]
+
+## Terminology
+- **[Term A]:** [definition] — used consistently throughout paper
+- **[Term B]:** [definition]
+
+## Scope
+- **In scope:** [what the paper covers]
+- **Out of scope:** [what we explicitly do NOT cover]
+- **Not claiming:** [things we're careful not to overclaim]
+
+## Positioning
+- **We are NOT:** [what this paper is not]
+- **We ARE:** [what this paper is]
+- **Key distinction from [closest related work]:** [how we differ]
+
+## Key Papers and Their Roles
+- **[Paper A]** — establishes [X], we build on this
+- **[Paper B]** — closest competitor, differs because [Y]
+- **[Paper C]** — provides [Z] that we use/extend
+
+## Decisions
+- D001: [decision with rationale]
+- D002: ...
 ```
-Agent: "Now let's articulate the problem. Following McEnerney's 
-       framework, I need to understand three things:
-       
-       1. WHO are your readers? 
-          (e.g., 'KDD reviewers who work on LLM applications')
-       
-       2. WHAT is the instability?
-          (What do they currently believe/assume that is wrong,
-           incomplete, or costs them something?)
-       
-       3. WHAT is the cost of this instability?
-          (Why should they care? What do they lose?)"
 
-Researcher: "Readers are people building LLM-based systems for 
-            real-world decision making. The instability is that 
-            everyone processes ALL evidence, but most of it is 
-            irrelevant. The cost is wasted compute and latency."
+**Human must approve this before agent proceeds to EXECUTE.**
 
-Agent: "Good. Let me sharpen this:
+---
 
-       INSTABILITY: Current LLM decision-making approaches process 
-       all available evidence indiscriminately, despite most evidence 
-       being irrelevant to the specific decision.
-       
-       COST: This wastes computation (3-10x more tokens than needed) 
-       and introduces latency that makes real-time applications 
-       impractical.
-       
-       SOLUTION DIRECTION: An adaptive method that learns which 
-       evidence to process for each decision.
-       
-       Does this capture it? Or should we refine?"
-```
+## Step 1.3: Draft Related Work (EXECUTE)
 
-**Repo artifacts created/updated:**
+**Agent works autonomously, governed by the constitution.**
+
+**Rules:**
+- Every paragraph must connect back to the instability
+- End each subsection by noting what's missing (building toward the gap)
+- All citations must be in ref.bib (verified via `spacer bib`)
+- Follow terminology from constitution exactly
+- Position, don't just survey — this is a "what exists and why it's insufficient" document
+
+**Output:** `paper/sections/2_related.tex` + `paper/plan/2p_related.md` (outline)
+
+---
+
+## Step 1.4: Draft Introduction (EXECUTE)
+
+**Agent works autonomously, governed by the constitution.**
+
+**Rules (McEnerney-enforced):**
+- DO NOT open with background ("In recent years...")
+- DO open with something readers care about — tension, a fact, a contradiction
+- Establish instability within first paragraph
+- Show cost by second paragraph
+- Preview solution by third paragraph
+- State contributions clearly
+- No AI-speak
+
+**Output:** `paper/sections/1_introduction.tex` + `paper/plan/1p_introduction.md`
+
+---
+
+## Step 1.5: Draft Abstract First Half (EXECUTE)
+
+**Agent drafts the problem + gap portion of the abstract.**
+
+**Rules:**
+- First 2-3 sentences: what's the problem and why it matters
+- Next 1-2 sentences: what's missing / the gap
+- STOP here — solution + results come after benchmarks (Phase 5)
+
+**Output:** `paper/sections/0_abstract.tex` + `paper/plan/0p_abstract.md`
+
+---
+
+## REVIEW
+
+Human reads the drafts. Three possible outcomes:
+
+1. **Satisfied** → mark phase complete, move to Phase 2
+2. **Draft issues** → agent rewrites (loop to EXECUTE)
+3. **Framing issues** → revisit constitution or discussion (loop to DISCUSS/CONSTITUTE)
+
+**`spacer.yaml` updated:**
 ```yaml
-# spacer.yaml — updated
-framing:
-  readers: "Researchers building LLM-based systems for real-world decision making"
-  instability: "Current approaches process all evidence indiscriminately, despite most being irrelevant"
-  cost: "Wasted computation (3-10x token overhead) and latency incompatible with real-time use"
-  solution: "Adaptive method that learns which evidence to selectively process per decision"
+phase: ideation
+phase_status: review    # or complete
+
+ideation:
+  literature_survey: true
+  problem_articulated: true
+  related_work_drafted: true
+  intro_drafted: true
+  abstract_half_drafted: true
 ```
 
-```
-notes/ideation/
-└── problem-articulation.md  # Full discussion notes, refinement history
-```
-
-### Step 1.3: Related Work Draft
-
-**Chat interaction:**
-```
-Agent: "I have enough context to draft Related Work. I'll organize 
-       it around the themes from the survey, positioning each 
-       against our instability.
-       
-       Proposed structure:
-       - §2.1 LLM-based Decision Making (establish the field)
-       - §2.2 Evidence Processing in LLMs (current approaches — the status quo)
-       - §2.3 Adaptive Computation (existing ideas about selectivity — but not applied here)
-       
-       Each subsection ends by noting what's missing — building 
-       toward our gap. Sound right?"
-
-Researcher: "Yes, but add a subsection on retrieval-augmented generation too"
-
-Agent: "Good call — RAG is relevant because it's about selecting 
-       what to feed the LLM, but it's done at retrieval time, not 
-       at reasoning time. That's a key distinction we can draw."
-```
-
-**Repo artifacts created:**
-```
-paper/
-├── sections/
-│   └── 2_related.tex        # LaTeX draft of Related Work
-├── plan/
-│   └── 2p_related.md        # Outline/plan for Related Work
-└── ref.bib                  # Updated with all cited papers (verified)
-```
-
-### Step 1.4: Introduction Draft
-
-**Chat interaction:**
-```
-Agent: "Now for the Introduction. Following McEnerney, the intro must:
-       1. Open with something readers care about (not background!)
-       2. Establish the instability quickly
-       3. Show the cost — why this matters to THEM
-       4. Preview our solution
-       5. State contributions
-       
-       I'll draft this. The opening should NOT be:
-       ❌ 'In recent years, LLMs have attracted significant attention...'
-       
-       Instead, something like:
-       ✅ 'LLM-based decision systems must process hundreds of 
-          evidence items per query, yet studies show that fewer 
-          than 20% of these items influence the final decision.'
-       
-       Starting with tension, not background. Let me draft..."
-```
-
-**Repo artifacts created:**
-```
-paper/
-├── sections/
-│   └── 1_introduction.tex   # LaTeX draft
-└── plan/
-    └── 1p_introduction.md   # Outline with McEnerney annotations
-```
-
-### Step 1.5: Abstract (First Half)
-
-**Repo artifacts created:**
-```
-paper/
-├── sections/
-│   └── 0_abstract.tex       # First half only — problem + gap
-└── plan/
-    └── 0p_abstract.md       # Notes on what the full abstract will contain
-```
+---
 
 ## Repo State at End of Phase 1
 
 ```
 project/
-├── spacer.yaml              # phase: ideation, phase_status: complete
+├── spacer.yaml                    # phase: ideation, status: complete
 ├── AGENTS.md
 ├── constitution/
-│   └── README.md
+│   ├── README.md
+│   └── ideation.md                # NEW — locked framing + terminology
 ├── paper/
 │   ├── plan/
-│   │   ├── _overview.md     # Filled: page budget, section plans
+│   │   ├── _overview.md           # Page budget filled in
 │   │   ├── 0p_abstract.md
 │   │   ├── 1p_introduction.md
 │   │   └── 2p_related.md
 │   ├── sections/
-│   │   ├── 0_abstract.tex   # First half drafted
-│   │   ├── 1_introduction.tex  # First draft
-│   │   └── 2_related.tex    # First draft
-│   └── ref.bib              # Populated with verified references
+│   │   ├── 0_abstract.tex         # First half
+│   │   ├── 1_introduction.tex     # First draft
+│   │   └── 2_related.tex          # First draft
+│   └── ref.bib                    # Verified references
 └── notes/
     └── ideation/
         ├── literature-survey.md
         ├── paper-notes/
-        │   └── *.md
         ├── themes.md
         └── problem-articulation.md
 ```
 
+---
+
 ## Exit Criteria (→ Phase 2: MVP)
 
-All must be true:
-- [ ] Literature survey complete (≥20 relevant papers reviewed)
-- [ ] Problem articulated (instability + cost clearly stated in spacer.yaml)
-- [ ] Related Work drafted (covers major themes, positions our gap)
-- [ ] Introduction drafted (opens with tension, establishes instability)
-- [ ] Abstract first half drafted (problem + gap)
-- [ ] All references in ref.bib verified via bibtex_fetch
-- [ ] Human approves: "yes, this problem is worth solving"
+- [ ] Constitution approved (framing, terminology, scope locked)
+- [ ] Literature survey complete (≥20 papers, themes identified, gaps found)
+- [ ] Related Work drafted and reviewed
+- [ ] Introduction drafted and reviewed
+- [ ] Abstract first half drafted
+- [ ] All ref.bib entries verified
+- [ ] Human approves: "this problem is worth solving, let's build"
 
-## Agent Behavior in This Phase
+---
 
-- **Mode:** Primarily discussion + search + writing
-- **Tools used:** web_search, bibtex_fetch, LaTeX writing
-- **No coding yet** — this is pure ideation and writing
-- **McEnerney principles enforced** — agent challenges weak problem statements
-- **Anti-AI-speak active** — drafts reviewed for AI-sounding language
-- **Constitutional note:** Minimal constitution at this point, just notation/terminology decisions logged
+## CLI Commands for Phase 1
+
+```bash
+spacer init                              # Create project scaffolding
+spacer status                            # Show phase + checklist
+spacer bib search "topic"               # Literature search
+spacer bib get --arxiv "2401.12345"     # Fetch verified bibtex
+spacer bib verify paper/ref.bib          # Verify all references
+spacer phase complete ideation           # Mark phase as complete (with checks)
+```
